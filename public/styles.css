@@ -25,6 +25,8 @@
 .auth-tabs button { flex: 1; padding: 12px; border: 0; background: transparent; color: var(--muted); }
 .auth-tabs [aria-selected="true"] { border-bottom: 3px solid var(--accent); color: var(--accent); font-weight: 700; }
 .account-toolbar { position: relative; width: min(1040px, 100%); display: flex; justify-content: flex-end; gap: 12px; }
+.account-toolbar .ghost-button, dialog .ghost-button { color: var(--ink); background: var(--panel); border: 1px solid var(--line); }
+.account-toolbar .ghost-button:hover, dialog .ghost-button:hover { background: #e5f2ef; }
 .shell:has(.account-toolbar:not(.hidden)) { align-content: center; gap: 12px; }
 .avatar { overflow: hidden; flex-shrink: 0; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }

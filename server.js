@@ -132,6 +132,7 @@ async function pushChat(room, user, text) {
   room.lastActivity = Date.now();
   await database.saveRoom(room);
   broadcast(room, "message", message);
+  return message;
 }
 
 function broadcast(room, event, data) {
@@ -311,13 +312,19 @@ async function handleApi(request, response, url) {
       finally { checkingSession = false; }
     }, 20000);
 
-    request.on("close", () => {
+    response.on("close", () => {
       clearInterval(heartbeat);
       room.clients.delete(connectionId);
       room.typing.delete(userId);
       broadcast(room, "state", roomPayload(room));
     });
     return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/room') {
+    const room = getRoom(url.searchParams.get('code'));
+    if (!room || !room.users.has(account.id)) { sendJson(response, 404, { error: 'Room or user not found.' }); return; }
+    sendJson(response, 200, { room: roomPayload(room) }); return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/messages") {
@@ -334,9 +341,9 @@ async function handleApi(request, response, url) {
       return;
     }
     room.typing.delete(user.id);
-    await pushChat(room, user, text);
+    const message = await pushChat(room, user, text);
     broadcast(room, "state", roomPayload(room));
-    sendJson(response, 201, { ok: true });
+    sendJson(response, 201, { ok: true, message });
     return;
   }
 

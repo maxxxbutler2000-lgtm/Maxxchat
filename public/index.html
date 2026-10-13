@@ -11,6 +11,7 @@
       <section class="account-view" id="accountView">
         <div class="brand-mark" aria-hidden="true">M</div>
         <h2>Maxxchat</h2>
+        <p class="privacy-notice">Chats are saved. The owner can review participants and messages in rooms created within the last 48 hours.</p>
         <div class="auth-tabs" role="tablist" aria-label="Account">
           <button type="button" role="tab" aria-selected="true" id="loginTab">Sign in</button>
           <button type="button" role="tab" aria-selected="false" id="signupTab">Sign up</button>
@@ -32,7 +33,7 @@
           <div class="brand-mark" aria-hidden="true">R</div>
           <div>
             <p class="eyebrow">Maxxchat</p>
-            <h1>Maxxchat for quick private conversations.</h1>
+            <h1>Maxxchat for quick conversations.</h1>
           </div>
           <div class="brand-footer">
             <p class="intro">Create a room, share the code, and everyone who joins lands in the same live chat.</p>
@@ -47,6 +48,7 @@
           </label>
 
           <div class="room-actions">
+            <p class="privacy-notice">Chats are saved and can be reviewed by the owner for moderation.</p>
             <button class="primary-button" id="createRoomButton" type="button">
               <span class="button-icon" aria-hidden="true">+</span>
               Create Room
@@ -109,6 +111,7 @@
     <dialog id="profileDialog">
       <form id="profileForm">
         <h2>My profile</h2>
+        <p class="account-id" id="profileAccountId"></p>
         <div class="profile-preview avatar" id="profilePreview"></div>
         <label><span>Profile picture</span><input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
         <button type="button" class="ghost-button" id="removeAvatar">Remove picture</button>
@@ -116,6 +119,17 @@
         <p class="form-error" id="profileError" role="alert"></p>
         <div class="profile-actions"><button class="secondary-button" type="button" id="closeProfile">Cancel</button><button class="primary-button" type="submit" id="saveProfile">Save profile</button></div>
       </form>
+    </dialog>
+    <dialog id="adminDialog" class="moderation-dialog">
+      <header class="moderation-header">
+        <div><h2>Moderation</h2><p>Rooms created in the last 48 hours</p></div>
+        <button type="button" class="secondary-button" id="closeAdmin">Close</button>
+      </header>
+      <p id="adminError" class="form-error" role="alert"></p>
+      <div class="moderation-layout">
+        <aside class="moderation-rooms"><button type="button" class="secondary-button" id="refreshAdmin">Refresh</button><div id="adminRooms"></div><button type="button" class="secondary-button hidden" id="moreAdminRooms">More rooms</button></aside>
+        <section class="moderation-detail"><h3 id="adminRoomTitle">Select a room</h3><div id="adminPeople"></div><div id="adminMessages"></div><button type="button" class="secondary-button hidden" id="moreAdminMessages">More messages</button></section>
+      </div>
     </dialog>
 
     <script src="/app.js" defer></script>

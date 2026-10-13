@@ -312,6 +312,7 @@ function profilePreview(src) {
   else preview.textContent = initials(byId('profileName').value || account.name);
 }
 byId('profileButton').addEventListener('click', () => {
+  byId('profileAccountId').textContent = `Account ID: ${account.id}`;
   newAvatar = undefined; byId('avatarInput').value = ''; byId('profileName').value = account.name;
   byId('profileError').textContent = ''; profilePreview(account.avatar ? `${account.avatar}?v=${Date.now()}` : null); byId('profileDialog').showModal();
 });
@@ -342,3 +343,80 @@ byId('profileForm').addEventListener('submit', async event => {
   finally { byId('saveProfile').disabled = false; }
 });
 fetch('/api/me').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => showAccount(data.user)).catch(() => { byId('authError').textContent = 'Cannot connect to Maxxchat. Please reload.'; });
+
+let secretBuffer = '';
+let secretTime = 0;
+let adminOffset = null;
+let adminCursor = null;
+let adminCode = null;
+let adminVersion = 0;
+async function adminGet(path) {
+  const response = await fetch(path);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Could not load moderation history.');
+  return data;
+}
+async function loadAdminRooms(append = false) {
+  byId('refreshAdmin').disabled = true; byId('moreAdminRooms').disabled = true;
+  byId('adminError').textContent = '';
+  try {
+    const data = await adminGet(`/api/admin/rooms?offset=${append ? adminOffset : 0}`);
+    if (!append) byId('adminRooms').replaceChildren();
+    for (const room of data.rooms) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button';
+      button.textContent = `# ${room.code}`; button.title = new Date(room.createdAt).toLocaleString();
+      button.dataset.code = room.code; button.addEventListener('click', () => loadAdminRoom(room.code));
+      byId('adminRooms').append(button);
+    }
+    if (!data.rooms.length && !append) byId('adminRooms').textContent = 'No rooms in this window.';
+    adminOffset = data.nextOffset; byId('moreAdminRooms').classList.toggle('hidden', adminOffset === null);
+  } catch (error) { byId('adminError').textContent = error.message; }
+  finally { byId('refreshAdmin').disabled = false; byId('moreAdminRooms').disabled = false; }
+}
+async function loadAdminRoom(code, append = false) {
+  const version = ++adminVersion;
+  byId('adminError').textContent = ''; byId('moreAdminMessages').disabled = true;
+  try {
+    const query = append && adminCursor ? `?time=${adminCursor.time}&id=${adminCursor.id}` : '';
+    const data = await adminGet(`/api/admin/rooms/${code}${query}`);
+    if (version !== adminVersion || !byId('adminDialog').open) return;
+    adminCode = code; adminCursor = data.next;
+    byId('adminRoomTitle').textContent = `# ${code} - ${new Date(data.createdAt).toLocaleString()}`;
+    byId('adminPeople').replaceChildren();
+    for (const person of data.people) {
+      const row = document.createElement('div'); row.className = 'moderation-person';
+      const name = document.createElement('strong'); name.textContent = person.name;
+      const id = document.createElement('small'); id.textContent = `Account: ${person.id}`;
+      row.append(name, id); byId('adminPeople').append(row);
+    }
+    if (!append) byId('adminMessages').replaceChildren();
+    for (const message of data.messages) {
+      const row = document.createElement('div'); row.className = 'audit-message';
+      const name = document.createElement('strong'); name.textContent = message.type === 'system' ? 'Room event' : message.userName;
+      const stamp = document.createElement('small'); stamp.textContent = `${new Date(message.createdAt).toLocaleString()}${message.userId ? ` | Account: ${message.userId}` : ''}`;
+      const text = document.createElement('p'); text.textContent = message.text;
+      row.append(name, stamp, text); byId('adminMessages').append(row);
+    }
+    byId('moreAdminMessages').classList.toggle('hidden', !adminCursor);
+    for (const button of byId('adminRooms').querySelectorAll('button')) button.setAttribute('aria-current', String(button.dataset.code === code));
+  } catch (error) { if (version === adminVersion) byId('adminError').textContent = error.message; }
+  finally { if (version === adminVersion) byId('moreAdminMessages').disabled = false; }
+}
+document.addEventListener('keydown', event => {
+  if (event.target?.type === 'password' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+  if (Date.now() - secretTime > 3000) secretBuffer = '';
+  secretTime = Date.now();
+  if (event.key.length !== 1) { secretBuffer = ''; return; }
+  secretBuffer = (secretBuffer + event.key.toLowerCase()).slice(-11);
+  if (secretBuffer !== 'secretpanel') return;
+  secretBuffer = '';
+  if (!account?.isAdmin) return;
+  if (byId('profileDialog').open) byId('profileDialog').close();
+  if (!byId('adminDialog').open) byId('adminDialog').showModal();
+  loadAdminRooms();
+});
+byId('closeAdmin').addEventListener('click', () => byId('adminDialog').close());
+byId('adminDialog').addEventListener('close', () => { adminVersion++; byId('adminMessages').replaceChildren(); byId('adminPeople').replaceChildren(); adminCursor = null; adminCode = null; });
+byId('refreshAdmin').addEventListener('click', () => { loadAdminRooms(); if (adminCode) loadAdminRoom(adminCode); });
+byId('moreAdminRooms').addEventListener('click', () => loadAdminRooms(true));
+byId('moreAdminMessages').addEventListener('click', () => { if (adminCode) loadAdminRoom(adminCode, true); });

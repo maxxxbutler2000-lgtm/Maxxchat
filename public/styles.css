@@ -38,6 +38,23 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .profile-actions { display: flex; gap: 12px; }
 .profile-actions button { flex: 1; }
 input[type="file"] { max-width: 100%; font-size: .85rem; }
+.privacy-notice { font-size: .8rem; line-height: 1.5; color: var(--muted); margin: 8px 0 16px; }
+.account-id { font-size: .75rem; overflow-wrap: anywhere; color: var(--muted); margin: 0; }
+.moderation-dialog { width: min(1000px, calc(100% - 32px)); max-height: 90vh; }
+.moderation-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.moderation-header p { font-size: .8rem; color: var(--muted); }
+.moderation-header button { width: auto; }
+.moderation-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; }
+.moderation-rooms { border-right: 1px solid var(--line); padding-right: 16px; }
+.moderation-rooms button { margin-bottom: 8px; }
+.moderation-detail { min-width: 0; }
+.moderation-detail h3 { margin-top: 0; }
+.moderation-person, .audit-message { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.moderation-person small, .audit-message small { display: block; color: var(--muted); font-size: .75rem; }
+.audit-message p { margin: 6px 0; white-space: pre-wrap; }
+#adminMessages { margin-top: 20px; }
+#adminRooms button[aria-current="true"] { background: var(--accent); }
+@media (max-width: 520px) { .moderation-layout { grid-template-columns: minmax(0, 1fr); } .moderation-rooms { border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 12px; } #adminRooms { display: flex; flex-wrap: wrap; gap: 8px; } #adminRooms button { width: auto; } }
 
 body {
   margin: 0;

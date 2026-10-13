@@ -40,7 +40,7 @@ function makeRoomCode() {
     for (let i = 0; i < 4; i += 1) {
       code += alphabet[crypto.randomInt(alphabet.length)];
     }
-  } while (rooms.has(code));
+  } while (rooms.has(code) || database.isDeleted(code));
   return code;
 }
 
@@ -54,7 +54,8 @@ function makeUser(name) {
 }
 
 function getRoom(code) {
-  return rooms.get(cleanRoomCode(code));
+  const room = rooms.get(cleanRoomCode(code));
+  return room?.deleting ? undefined : room;
 }
 
 async function createRoom(account) {
@@ -207,7 +208,26 @@ async function handleApi(request, response, url) {
     if (request.method === 'GET' && url.pathname === '/api/admin/rooms') {
       const offset = Number(url.searchParams.get('offset') || 0);
       if (!Number.isSafeInteger(offset) || offset < 0) { sendJson(response, 400, { error: 'Invalid page.' }); return; }
-      sendJson(response, 200, await database.moderationRooms(offset)); return;
+      const search = url.searchParams.get('search') || '';
+      if (search.length > 120) { sendJson(response, 400, { error: 'Search is too long.' }); return; }
+      sendJson(response, 200, await database.moderationRooms(offset, search)); return;
+    }
+    if (request.method === 'DELETE' && /^\/api\/admin\/rooms\/[A-Z0-9]{4}$/.test(url.pathname)) {
+      const code = url.pathname.split('/').at(-1);
+      const body = await readBody(request);
+      if (body.confirmCode !== code) { sendJson(response, 400, { error: 'Confirm the room code before deleting.' }); return; }
+      const room = getRoom(code);
+      if (!room && !await database.moderationRoom(code)) { sendJson(response, 404, { error: 'Room not found.' }); return; }
+      if (room) room.deleting = true;
+      try { await database.deleteRoom(code); }
+      catch (error) { if (room) room.deleting = false; throw error; }
+      if (room) {
+        broadcast(room, 'deleted', { code });
+        for (const client of room.clients.values()) client.end();
+        room.clients.clear();
+      }
+      rooms.delete(code);
+      sendJson(response, 200, { deleted: true }); return;
     }
     if (request.method === 'GET' && /^\/api\/admin\/rooms\/[A-Z0-9]{4}$/.test(url.pathname)) {
       const time = Number(url.searchParams.get('time') || 0);
@@ -391,7 +411,7 @@ const server = http.createServer(async (request, response) => {
   try {
     if (url.pathname.startsWith("/api/")) {
       // Serialize room mutations so persisted snapshots cannot arrive out of order.
-      if (request.method === 'POST' && !['/api/login', '/api/signup'].includes(url.pathname)) {
+      if (['POST', 'DELETE'].includes(request.method) && !['/api/login', '/api/signup'].includes(url.pathname)) {
         const operation = mutations.then(() => handleApi(request, response, url));
         mutations = operation.catch(() => {});
         await operation;

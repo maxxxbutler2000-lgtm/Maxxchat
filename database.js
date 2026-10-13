@@ -102,7 +102,21 @@ async function profile(id, body) {
   }
   return publicAccount((await pool.query('UPDATE accounts SET name=$2,avatar=CASE WHEN $4 THEN avatar ELSE $3 END WHERE id=$1 RETURNING *', [id, name, avatar ?? null, avatar === undefined])).rows[0]);
 }
-async function saveRoom(room) {
+const roomWrites = new Map();
+const deletedRooms = new Set();
+function queueRoomWrite(code, action) {
+  const pending = (roomWrites.get(code) || Promise.resolve()).catch(() => {}).then(action);
+  roomWrites.set(code, pending);
+  pending.finally(() => { if (roomWrites.get(code) === pending) roomWrites.delete(code); }).catch(() => {});
+  return pending;
+}
+function saveRoom(room) {
+  return queueRoomWrite(room.code, () => {
+    if (deletedRooms.has(room.code)) throw Object.assign(new Error('Room was deleted.'), { status: 404 });
+    return persistRoom(room);
+  });
+}
+async function persistRoom(room) {
   const payload = { code: room.code, users: [...room.users.values()], messages: room.messages.slice(-160), createdAt: room.createdAt, lastActivity: room.lastActivity };
   const client = await pool.connect();
   try {
@@ -139,9 +153,10 @@ async function pruneModeration() {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
   await pool.query('DELETE FROM moderation_rooms WHERE created_at < $1', [cutoff]);
 }
-async function moderationRooms(offset = 0) {
+async function moderationRooms(offset = 0, search = '') {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const rows = (await pool.query('SELECT code,created_at FROM moderation_rooms WHERE created_at >= $1 ORDER BY created_at DESC,code LIMIT 51 OFFSET $2', [cutoff, offset])).rows;
+  const filter = search.trim().toLowerCase();
+  const rows = (await pool.query(`SELECT code,created_at FROM moderation_rooms WHERE created_at >= $1 ${filter ? 'AND code IN (SELECT room_code FROM moderation_people WHERE strpos(lower(name), $3) > 0)' : ''} ORDER BY created_at DESC,code LIMIT 51 OFFSET $2`, filter ? [cutoff, offset, filter] : [cutoff, offset])).rows;
   const rooms = [];
   for (const row of rows.slice(0, 50)) {
     const people = (await pool.query('SELECT account_id,name FROM moderation_people WHERE room_code=$1 ORDER BY name,account_id', [row.code])).rows;
@@ -163,4 +178,17 @@ async function avatar(id) {
   if (!/^[a-f0-9-]{36}$/.test(id)) return null;
   return (await pool.query('SELECT avatar FROM accounts WHERE id=$1', [id])).rows[0]?.avatar;
 }
-module.exports = { initialize, signup, login, session, account, logout, profile, saveRoom, avatar, passwordHash, passwordMatches, credentials, pool, moderationRooms, moderationRoom, pruneModeration };
+function deleteRoom(code) {
+  return queueRoomWrite(code, async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM moderation_rooms WHERE code=$1', [code]);
+      await client.query('DELETE FROM chat_rooms WHERE code=$1', [code]);
+      await client.query('COMMIT');
+      deletedRooms.add(code); committedRooms.delete(code);
+    } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+    finally { client.release(); }
+  });
+}
+module.exports = { initialize, signup, login, session, account, logout, profile, saveRoom, avatar, passwordHash, passwordMatches, credentials, pool, moderationRooms, moderationRoom, pruneModeration, deleteRoom, isDeleted: code => deletedRooms.has(code) };

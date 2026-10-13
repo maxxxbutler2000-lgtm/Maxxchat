@@ -142,7 +142,12 @@ async function pruneModeration() {
 async function moderationRooms(offset = 0) {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
   const rows = (await pool.query('SELECT code,created_at FROM moderation_rooms WHERE created_at >= $1 ORDER BY created_at DESC,code LIMIT 51 OFFSET $2', [cutoff, offset])).rows;
-  return { rooms: rows.slice(0, 50).map(row => ({ code: row.code, createdAt: Number(row.created_at) })), nextOffset: rows.length > 50 ? offset + 50 : null };
+  const rooms = [];
+  for (const row of rows.slice(0, 50)) {
+    const people = (await pool.query('SELECT account_id,name FROM moderation_people WHERE room_code=$1 ORDER BY name,account_id', [row.code])).rows;
+    rooms.push({ code: row.code, createdAt: Number(row.created_at), people: people.map(person => ({ id: person.account_id, name: person.name })) });
+  }
+  return { rooms, nextOffset: rows.length > 50 ? offset + 50 : null };
 }
 async function moderationRoom(code, afterTime = 0, afterId = '00000000-0000-0000-0000-000000000000') {
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;

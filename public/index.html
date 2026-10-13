@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Maxxchat</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="entry-view" id="entryView">
+        <div class="brand-panel">
+          <div class="brand-mark" aria-hidden="true">R</div>
+          <div>
+            <p class="eyebrow">Maxxchat</p>
+            <h1>Maxxchat for quick private conversations.</h1>
+          </div>
+          <div class="brand-footer">
+            <p class="intro">Create a room, share the code, and everyone who joins lands in the same live chat.</p>
+            <button class="credit-button" type="button">Made completely by Maxx</button>
+          </div>
+        </div>
+
+        <form class="join-panel" id="joinForm">
+          <label>
+            <span>Your name</span>
+            <input id="nameInput" name="name" autocomplete="nickname" maxlength="28" placeholder="example:Maxx" required>
+          </label>
+
+          <div class="room-actions">
+            <button class="primary-button" id="createRoomButton" type="button">
+              <span class="button-icon" aria-hidden="true">+</span>
+              Create Room
+            </button>
+            <div class="divider"><span>or join one</span></div>
+            <label>
+              <span>Room code</span>
+              <input id="codeInput" name="code" autocomplete="off" maxlength="8" placeholder="ABC123">
+            </label>
+            <button class="secondary-button" type="submit">Join Room</button>
+          </div>
+
+          <p class="form-error" id="formError" role="alert"></p>
+        </form>
+      </section>
+
+      <section class="chat-view hidden" id="chatView" aria-live="polite">
+        <aside class="sidebar">
+          <div>
+            <p class="eyebrow">Room</p>
+            <div class="room-code-row">
+              <strong id="roomCode">------</strong>
+              <button class="icon-button" id="copyCodeButton" type="button" title="Copy room code" aria-label="Copy room code">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"></path><path d="M6 16H4V4h12v2"></path></svg>
+              </button>
+            </div>
+            <p class="hint" id="shareHint">Share this code with someone else.</p>
+          </div>
+
+          <div class="member-section">
+            <p class="eyebrow">People</p>
+            <ul class="member-list" id="memberList"></ul>
+          </div>
+
+          <button class="ghost-button" id="leaveButton" type="button">Leave room</button>
+        </aside>
+
+        <div class="conversation">
+          <header class="chat-header">
+            <div>
+              <p class="eyebrow">Live chat</p>
+              <h2 id="chatTitle">Ready when you are.</h2>
+            </div>
+            <div class="status-pill" id="statusPill">Connecting</div>
+          </header>
+
+          <div class="messages" id="messages"></div>
+          <div class="typing-line" id="typingLine"></div>
+
+          <form class="composer" id="messageForm">
+            <input id="messageInput" maxlength="800" autocomplete="off" placeholder="Message this room" required>
+            <button class="send-button" type="submit" title="Send message" aria-label="Send message">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-8-8 18-2-7z"></path><path d="m11 14 10-11"></path></svg>
+            </button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -48,6 +48,8 @@ input[type="file"] { max-width: 100%; font-size: .85rem; }
 .moderation-rooms { border-right: 1px solid var(--line); padding-right: 16px; }
 .moderation-rooms button { margin-bottom: 8px; }
 #adminRooms button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+#adminSearch { width: 100%; min-width: 0; margin: 8px 0 12px; }
+#deleteAdminRoom { width: auto; background: #a52632; color: white; margin-bottom: 12px; }
 .moderation-detail { min-width: 0; }
 .moderation-detail h3 { margin-top: 0; }
 .moderation-person, .audit-message { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

@@ -100,6 +100,11 @@ function connectEvents() {
   events.addEventListener("message", (event) => {
     appendMessage(JSON.parse(event.data));
   });
+  events.addEventListener('deleted', () => {
+    events.close(); state.events = null; state.room = null; state.user = null;
+    chatView.classList.add('hidden'); entryView.classList.remove('hidden'); messages.replaceChildren();
+    setError('This room was permanently deleted by the owner.'); refreshRooms().catch(() => {});
+  });
 
   events.onerror = () => {
     statusPill.textContent = "Reconnecting";
@@ -350,6 +355,7 @@ let adminOffset = null;
 let adminCursor = null;
 let adminCode = null;
 let adminVersion = 0;
+let adminListVersion = 0;
 async function adminGet(path) {
   const response = await fetch(path);
   const data = await response.json();
@@ -357,10 +363,13 @@ async function adminGet(path) {
   return data;
 }
 async function loadAdminRooms(append = false) {
+  const version = ++adminListVersion;
   byId('refreshAdmin').disabled = true; byId('moreAdminRooms').disabled = true;
   byId('adminError').textContent = '';
   try {
-    const data = await adminGet(`/api/admin/rooms?offset=${append ? adminOffset : 0}`);
+    const query = new URLSearchParams({ offset: String(append ? adminOffset : 0), search: byId('adminSearch').value });
+    const data = await adminGet(`/api/admin/rooms?${query}`);
+    if (version !== adminListVersion || !byId('adminDialog').open) return;
     if (!append) byId('adminRooms').replaceChildren();
     for (const room of data.rooms) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button';
@@ -371,8 +380,8 @@ async function loadAdminRooms(append = false) {
     }
     if (!data.rooms.length && !append) byId('adminRooms').textContent = 'No rooms in this window.';
     adminOffset = data.nextOffset; byId('moreAdminRooms').classList.toggle('hidden', adminOffset === null);
-  } catch (error) { byId('adminError').textContent = error.message; }
-  finally { byId('refreshAdmin').disabled = false; byId('moreAdminRooms').disabled = false; }
+  } catch (error) { if (version === adminListVersion) byId('adminError').textContent = error.message; }
+  finally { if (version === adminListVersion) { byId('refreshAdmin').disabled = false; byId('moreAdminRooms').disabled = false; } }
 }
 async function loadAdminRoom(code, append = false) {
   const version = ++adminVersion;
@@ -382,6 +391,7 @@ async function loadAdminRoom(code, append = false) {
     const data = await adminGet(`/api/admin/rooms/${code}${query}`);
     if (version !== adminVersion || !byId('adminDialog').open) return;
     adminCode = code; adminCursor = data.next;
+    byId('deleteAdminRoom').classList.remove('hidden');
     byId('adminRoomTitle').textContent = `# ${code} - ${new Date(data.createdAt).toLocaleString()}`;
     byId('adminPeople').replaceChildren();
     for (const person of data.people) {
@@ -421,3 +431,24 @@ byId('adminDialog').addEventListener('close', () => { adminVersion++; byId('admi
 byId('refreshAdmin').addEventListener('click', () => { loadAdminRooms(); if (adminCode) loadAdminRoom(adminCode); });
 byId('moreAdminRooms').addEventListener('click', () => loadAdminRooms(true));
 byId('moreAdminMessages').addEventListener('click', () => { if (adminCode) loadAdminRoom(adminCode, true); });
+let adminSearchTimer;
+byId('adminSearch').addEventListener('input', () => {
+  adminListVersion++; clearTimeout(adminSearchTimer);
+  adminSearchTimer = setTimeout(() => loadAdminRooms(), 250);
+});
+byId('adminDialog').addEventListener('close', () => { adminListVersion++; clearTimeout(adminSearchTimer); byId('deleteAdminRoom').classList.add('hidden'); });
+byId('deleteAdminRoom').addEventListener('click', async () => {
+  const code = adminCode;
+  if (!code || !confirm(`Permanently delete room ${code}, all its messages and participant history? Everyone will be disconnected. This cannot be undone.`)) return;
+  byId('deleteAdminRoom').disabled = true;
+  try {
+    const response = await fetch(`/api/admin/rooms/${code}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmCode: code }) });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Could not delete room.');
+    adminVersion++; adminCode = null; adminCursor = null;
+    byId('adminRoomTitle').textContent = `Room ${code} deleted`;
+    byId('adminPeople').replaceChildren(); byId('adminMessages').replaceChildren();
+    byId('deleteAdminRoom').classList.add('hidden'); byId('moreAdminMessages').classList.add('hidden');
+    await loadAdminRooms(); refreshRooms().catch(() => {});
+  } catch (error) { byId('adminError').textContent = error.message; }
+  finally { byId('deleteAdminRoom').disabled = false; }
+});

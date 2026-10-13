@@ -127,8 +127,8 @@
       </header>
       <p id="adminError" class="form-error" role="alert"></p>
       <div class="moderation-layout">
-        <aside class="moderation-rooms"><button type="button" class="secondary-button" id="refreshAdmin">Refresh</button><div id="adminRooms"></div><button type="button" class="secondary-button hidden" id="moreAdminRooms">More rooms</button></aside>
-        <section class="moderation-detail"><h3 id="adminRoomTitle">Select a room</h3><div id="adminPeople"></div><div id="adminMessages"></div><button type="button" class="secondary-button hidden" id="moreAdminMessages">More messages</button></section>
+        <aside class="moderation-rooms"><label for="adminSearch">Search names</label><input type="search" id="adminSearch" maxlength="120" placeholder="Participant name"><button type="button" class="secondary-button" id="refreshAdmin">Refresh</button><div id="adminRooms"></div><button type="button" class="secondary-button hidden" id="moreAdminRooms">More rooms</button></aside>
+        <section class="moderation-detail"><h3 id="adminRoomTitle">Select a room</h3><button type="button" class="secondary-button hidden" id="deleteAdminRoom">Delete room permanently</button><div id="adminPeople"></div><div id="adminMessages"></div><button type="button" class="secondary-button hidden" id="moreAdminMessages">More messages</button></section>
       </div>
     </dialog>
 

@@ -15,6 +15,8 @@ test('HTTP account flow enforces cookies and room membership', async () => {
     const signup = await request('/api/signup', { email: 'alice@example.test', name: 'Alice', password: 'long test password' });
     assert.equal(signup.status, 200); assert.ok(signup.cookie);
     const cookie = signup.cookie;
+    assert.equal((await request('/api/admin/rooms', null, cookie)).status, 403);
+    assert.equal((await request('/api/admin/rooms')).status, 401);
     assert.equal((await request('/api/me', null, cookie)).data.user.name, 'Alice');
     const created = await request('/api/rooms', {}, cookie); assert.equal(created.status, 201);
     const code = created.data.room.code; assert.equal(code.length, 4);

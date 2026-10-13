@@ -1,6 +1,7 @@
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { newDb } = require('pg-mem');
+const crypto = require('node:crypto');
 const memory = newDb({ noAstCoverageCheck: true });
 require.cache[require.resolve('pg')] = { exports: memory.adapters.createPg() };
 process.env.DATABASE_URL = 'postgres://local-test';
@@ -24,12 +25,32 @@ test('accounts, sessions, profile pictures and room snapshots persist in databas
   await db.profile(user.id, { name: 'Renamed' });
   assert.equal(await db.avatar(user.id), image);
   await assert.rejects(db.profile(user.id, { name: 'Maxx', avatar: 'javascript:alert(1)' }));
-  const room = { code: 'AB12', users: new Map([[user.id, updated]]), messages: [{ text: 'Saved message' }], createdAt: Date.now(), lastActivity: Date.now() };
+  const room = { code: 'AB12', users: new Map([[user.id, updated]]), messages: [{ id: crypto.randomUUID(), text: 'Saved message', createdAt: Date.now() }], createdAt: Date.now(), lastActivity: Date.now() };
   await db.saveRoom(room);
   const restored = await db.initialize();
   assert.equal(restored[0].messages[0].text, 'Saved message');
-  room.messages.push({ text: 'Next message' }); await db.saveRoom(room);
+  room.messages.push({ id: crypto.randomUUID(), text: 'Next message', createdAt: Date.now() }); await db.saveRoom(room);
   assert.equal((await db.initialize())[0].messages.length, 2);
+  assert.equal((await db.moderationRooms()).rooms[0].code, 'AB12');
+  assert.equal((await db.moderationRoom('AB12')).people[0].id, user.id);
+  for (let i = 0; i < 205; i++) {
+    room.messages.push({ id: crypto.randomUUID(), text: `Archived ${i}`, createdAt: Date.now() + i });
+    room.messages = room.messages.slice(-160); await db.saveRoom(room);
+  }
+  room.users.clear(); await db.saveRoom(room);
+  const firstPage = await db.moderationRoom('AB12');
+  assert.equal(firstPage.messages.length, 200); assert.ok(firstPage.next);
+  assert.equal(firstPage.people.length, 1);
+  const secondPage = await db.moderationRoom('AB12', firstPage.next.time, firstPage.next.id);
+  assert.equal(secondPage.messages.length, 7);
+  assert.equal(new Set([...firstPage.messages, ...secondPage.messages].map(message => message.id)).size, 207);
+  const oldRoom = { ...room, code: 'OLD1', createdAt: Date.now() - 49 * 60 * 60 * 1000 };
+  await db.saveRoom(oldRoom); assert.equal(await db.moderationRoom('OLD1'), null);
+  process.env.OWNER_ACCOUNT_ID = user.id;
+  assert.equal((await db.account(request)).isAdmin, true);
+  process.env.OWNER_ACCOUNT_ID = crypto.randomUUID();
+  assert.equal((await db.account(request)).isAdmin, false);
+  delete process.env.OWNER_ACCOUNT_ID;
   await db.logout(request); assert.equal(await db.account(request), null);
   await db.profile(user.id, { name: 'Maxx', avatar: null }); assert.equal(await db.avatar(user.id), null);
 });

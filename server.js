@@ -200,6 +200,24 @@ async function handleApi(request, response, url) {
   const account = await database.account(request);
   if (url.pathname === '/api/me' && request.method === 'GET') { sendJson(response, 200, { user: account }); return; }
   if (!account) { sendJson(response, 401, { error: 'Please sign in first.' }); return; }
+  if (url.pathname.startsWith('/api/admin/')) {
+    if (!process.env.OWNER_ACCOUNT_ID || account.id !== process.env.OWNER_ACCOUNT_ID) {
+      sendJson(response, 403, { error: 'This panel is only available to the owner.' }); return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/admin/rooms') {
+      const offset = Number(url.searchParams.get('offset') || 0);
+      if (!Number.isSafeInteger(offset) || offset < 0) { sendJson(response, 400, { error: 'Invalid page.' }); return; }
+      sendJson(response, 200, await database.moderationRooms(offset)); return;
+    }
+    if (request.method === 'GET' && /^\/api\/admin\/rooms\/[A-Z0-9]{4}$/.test(url.pathname)) {
+      const time = Number(url.searchParams.get('time') || 0);
+      const id = url.searchParams.get('id') || '00000000-0000-0000-0000-000000000000';
+      if (!Number.isSafeInteger(time) || time < 0 || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) { sendJson(response, 400, { error: 'Invalid message page.' }); return; }
+      const room = await database.moderationRoom(url.pathname.split('/').at(-1), time, id);
+      sendJson(response, room ? 200 : 404, room || { error: 'Room is outside the 48-hour review window.' }); return;
+    }
+    sendJson(response, 404, { error: 'Not found.' }); return;
+  }
   if (url.pathname.startsWith('/api/avatar/') && request.method === 'GET') {
     const image = await database.avatar(url.pathname.slice('/api/avatar/'.length));
     if (!image) { response.writeHead(404); response.end(); return; }
@@ -390,6 +408,7 @@ const server = http.createServer(async (request, response) => {
 setInterval(() => {
   for (const [key, entry] of authAttempts) if (entry.until < Date.now()) authAttempts.delete(key);
 }, 1000 * 60 * 30).unref();
+setInterval(() => database.pruneModeration().catch(() => console.error('Moderation cleanup failed')), 5 * 60 * 1000).unref();
 
 database.initialize().then(saved => {
   for (const room of saved) rooms.set(room.code, { ...room, users: new Map(room.users.map(user => [user.id, user])), clients: new Map(), typing: new Map() });

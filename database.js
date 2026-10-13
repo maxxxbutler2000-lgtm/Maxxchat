@@ -6,7 +6,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
 const committedRooms = new Map();
 
 function publicAccount(row) {
-  return { id: row.id, name: row.name, avatar: row.avatar ? `/api/avatar/${row.id}` : null, color: row.color };
+  return { id: row.id, name: row.name, avatar: row.avatar ? `/api/avatar/${row.id}` : null, color: row.color, isAdmin: !!process.env.OWNER_ACCOUNT_ID && row.id === process.env.OWNER_ACCOUNT_ID };
 }
 function credentials(body) {
   const email = String(body.email || '').trim().toLowerCase();
@@ -36,10 +36,21 @@ async function initialize() {
       expires_at TIMESTAMPTZ NOT NULL
     );
     CREATE TABLE IF NOT EXISTS chat_rooms (code TEXT PRIMARY KEY, payload JSONB NOT NULL);
+    CREATE TABLE IF NOT EXISTS moderation_rooms (code TEXT PRIMARY KEY, created_at BIGINT NOT NULL);
+    CREATE TABLE IF NOT EXISTS moderation_people (
+      room_code TEXT REFERENCES moderation_rooms(code) ON DELETE CASCADE,
+      account_id UUID, name TEXT NOT NULL, PRIMARY KEY(room_code,account_id)
+    );
+    CREATE TABLE IF NOT EXISTS moderation_messages (
+      id UUID PRIMARY KEY, room_code TEXT NOT NULL REFERENCES moderation_rooms(code) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL, payload JSONB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS moderation_time ON moderation_messages(room_code,created_at,id);
     DELETE FROM sessions WHERE expires_at < NOW();
   `);
   const rooms = (await pool.query('SELECT payload FROM chat_rooms')).rows.map(row => row.payload);
-  for (const room of rooms) committedRooms.set(room.code, structuredClone(room));
+  for (const room of rooms) await saveRoom({ ...room, users: new Map(room.users.map(user => [user.id, user])) });
+  await pruneModeration();
   return rooms;
 }
 async function signup(body) {
@@ -93,10 +104,28 @@ async function profile(id, body) {
 }
 async function saveRoom(room) {
   const payload = { code: room.code, users: [...room.users.values()], messages: room.messages.slice(-160), createdAt: room.createdAt, lastActivity: room.lastActivity };
+  const client = await pool.connect();
   try {
-    await pool.query('INSERT INTO chat_rooms VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET payload=EXCLUDED.payload', [room.code, JSON.stringify(payload)]);
+    await client.query('BEGIN');
+    await client.query('INSERT INTO chat_rooms VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET payload=EXCLUDED.payload', [room.code, JSON.stringify(payload)]);
+    if (room.createdAt >= Date.now() - 48 * 60 * 60 * 1000) {
+      await client.query('INSERT INTO moderation_rooms VALUES($1,$2) ON CONFLICT(code) DO NOTHING', [room.code, room.createdAt]);
+      const previous = committedRooms.get(room.code);
+      const knownMessages = new Set((previous?.messages || []).map(message => message.id));
+      for (const message of room.messages) {
+        if (knownMessages.has(message.id)) continue;
+        await client.query('INSERT INTO moderation_messages VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING', [message.id, room.code, message.createdAt, JSON.stringify(message)]);
+      }
+      for (const user of room.users.values()) {
+        const oldUser = previous?.users.find(old => old.id === user.id);
+        if (oldUser?.name === user.name) continue;
+        await client.query('INSERT INTO moderation_people VALUES($1,$2,$3) ON CONFLICT(room_code,account_id) DO UPDATE SET name=EXCLUDED.name', [room.code, user.id, user.name]);
+      }
+    }
+    await client.query('COMMIT');
     committedRooms.set(room.code, structuredClone(payload));
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     const previous = committedRooms.get(room.code);
     if (previous) {
       room.users = new Map(previous.users.map(user => [user.id, user]));
@@ -104,10 +133,29 @@ async function saveRoom(room) {
       room.lastActivity = previous.lastActivity;
     }
     throw error;
-  }
+  } finally { client.release(); }
+}
+async function pruneModeration() {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  await pool.query('DELETE FROM moderation_rooms WHERE created_at < $1', [cutoff]);
+}
+async function moderationRooms(offset = 0) {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const rows = (await pool.query('SELECT code,created_at FROM moderation_rooms WHERE created_at >= $1 ORDER BY created_at DESC,code LIMIT 51 OFFSET $2', [cutoff, offset])).rows;
+  return { rooms: rows.slice(0, 50).map(row => ({ code: row.code, createdAt: Number(row.created_at) })), nextOffset: rows.length > 50 ? offset + 50 : null };
+}
+async function moderationRoom(code, afterTime = 0, afterId = '00000000-0000-0000-0000-000000000000') {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const room = (await pool.query('SELECT code,created_at FROM moderation_rooms WHERE code=$1 AND created_at >= $2', [code, cutoff])).rows[0];
+  if (!room) return null;
+  const people = (await pool.query('SELECT account_id,name FROM moderation_people WHERE room_code=$1 ORDER BY name,account_id', [code])).rows;
+  const rows = (await pool.query('SELECT payload FROM moderation_messages WHERE room_code=$1 AND (created_at>$2 OR (created_at=$2 AND id>$3)) ORDER BY created_at,id LIMIT 201', [code, afterTime, afterId])).rows;
+  const messages = rows.slice(0, 200).map(row => row.payload);
+  const last = messages.at(-1);
+  return { code, createdAt: Number(room.created_at), people: people.map(row => ({ id: row.account_id, name: row.name })), messages, next: rows.length > 200 ? { time: last.createdAt, id: last.id } : null };
 }
 async function avatar(id) {
   if (!/^[a-f0-9-]{36}$/.test(id)) return null;
   return (await pool.query('SELECT avatar FROM accounts WHERE id=$1', [id])).rows[0]?.avatar;
 }
-module.exports = { initialize, signup, login, session, account, logout, profile, saveRoom, avatar, passwordHash, passwordMatches, credentials, pool };
+module.exports = { initialize, signup, login, session, account, logout, profile, saveRoom, avatar, passwordHash, passwordMatches, credentials, pool, moderationRooms, moderationRoom, pruneModeration };

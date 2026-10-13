@@ -434,6 +434,7 @@ async function loadAdminRoom(code, append = false) {
   finally { if (version === adminVersion) byId('moreAdminMessages').disabled = false; }
 }
 document.addEventListener('keydown', event => {
+  if (typeof event.key !== 'string') return;
   if (event.target?.type === 'password' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
   if (Date.now() - secretTime > 3000) secretBuffer = '';
   secretTime = Date.now();

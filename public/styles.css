@@ -391,6 +391,25 @@ input:focus {
 
 .message.own {
   align-self: end;
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.message.own > .avatar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.message.own > .bubble {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.message.own .message-meta {
+  flex-direction: row-reverse;
+}
+
+.message.own .message-text {
+  text-align: right;
 }
 
 .message.own .bubble {
@@ -542,6 +561,10 @@ input:focus {
 
   .message {
     grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .message.own {
+    grid-template-columns: minmax(0, 1fr) 32px;
   }
 
   .avatar {

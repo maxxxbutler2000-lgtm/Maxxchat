@@ -29,6 +29,10 @@ function setError(text = "") {
   formError.textContent = text;
 }
 
+codeInput.addEventListener("input", () => {
+  codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+});
+
 function initials(name) {
   return name
     .split(" ")

@@ -38,6 +38,7 @@ test('accounts, sessions, profile pictures and room snapshots persist in databas
     room.messages = room.messages.slice(-160); await db.saveRoom(room);
   }
   room.users.clear(); await db.saveRoom(room);
+  assert.deepEqual((await db.moderationRooms()).rooms[0].people, [{ id: user.id, name: updated.name }]);
   const firstPage = await db.moderationRoom('AB12');
   assert.equal(firstPage.messages.length, 200); assert.ok(firstPage.next);
   assert.equal(firstPage.people.length, 1);

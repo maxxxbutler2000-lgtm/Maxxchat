@@ -36,8 +36,8 @@ function makeRoomCode() {
   let code = "";
   do {
     code = "";
-    for (let i = 0; i < 6; i += 1) {
-      code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    for (let i = 0; i < 4; i += 1) {
+      code += alphabet[crypto.randomInt(alphabet.length)];
     }
   } while (rooms.has(code));
   return code;

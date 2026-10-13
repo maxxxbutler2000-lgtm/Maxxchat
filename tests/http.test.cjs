@@ -7,8 +7,8 @@ test('HTTP account flow enforces cookies and room membership', async () => {
   const child = spawn(process.execPath, ['--require', path.join(__dirname, 'memory-db.cjs'), path.join(__dirname, '../server.js')], { env: { ...process.env, PORT: String(port), NODE_ENV: 'test' }, stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('exit', code => reject(new Error(`Server exited ${code}`))); child.once('error', reject); });
-    async function request(route, body, cookie) {
-      const response = await fetch(`http://127.0.0.1:${port}${route}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    async function request(route, body, cookie, method = body ? 'POST' : 'GET') {
+      const response = await fetch(`http://127.0.0.1:${port}${route}`, { method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
       return { status: response.status, cookie: response.headers.get('set-cookie')?.split(';')[0], data: await response.json() };
     }
     assert.equal((await request('/api/rooms', {})).status, 401);
@@ -20,6 +20,8 @@ test('HTTP account flow enforces cookies and room membership', async () => {
     assert.equal((await request('/api/me', null, cookie)).data.user.name, 'Alice');
     const created = await request('/api/rooms', {}, cookie); assert.equal(created.status, 201);
     const code = created.data.room.code; assert.equal(code.length, 4);
+    assert.equal((await request(`/api/admin/rooms/${code}`, { confirmCode: code }, cookie, 'DELETE')).status, 403);
+    assert.equal((await request(`/api/admin/rooms/${code}`, { confirmCode: code }, null, 'DELETE')).status, 401);
     const bob = await request('/api/signup', { email: 'bob@example.test', name: 'Bob', password: 'long test password' });
     assert.equal((await request('/api/messages', { code, userId: signup.data.user.id, text: 'Spoof' }, bob.cookie)).status, 404);
     assert.equal((await request('/api/join', { code: code.toLowerCase() }, bob.cookie)).status, 200);

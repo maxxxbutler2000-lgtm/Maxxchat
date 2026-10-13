@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { newDb } = require('pg-mem');
 const crypto = require('node:crypto');
 const memory = newDb({ noAstCoverageCheck: true });
+memory.public.registerFunction({ name: 'strpos', args: ['text', 'text'], returns: 'integer', implementation: (value, needle) => value.indexOf(needle) + 1 });
 require.cache[require.resolve('pg')] = { exports: memory.adapters.createPg() };
 process.env.DATABASE_URL = 'postgres://local-test';
 const db = require('../database');
@@ -39,6 +40,8 @@ test('accounts, sessions, profile pictures and room snapshots persist in databas
   }
   room.users.clear(); await db.saveRoom(room);
   assert.deepEqual((await db.moderationRooms()).rooms[0].people, [{ id: user.id, name: updated.name }]);
+  assert.equal((await db.moderationRooms(0, updated.name.toUpperCase())).rooms[0].code, 'AB12');
+  assert.equal((await db.moderationRooms(0, 'no-such-person')).rooms.length, 0);
   const firstPage = await db.moderationRoom('AB12');
   assert.equal(firstPage.messages.length, 200); assert.ok(firstPage.next);
   assert.equal(firstPage.people.length, 1);
@@ -54,4 +57,9 @@ test('accounts, sessions, profile pictures and room snapshots persist in databas
   delete process.env.OWNER_ACCOUNT_ID;
   await db.logout(request); assert.equal(await db.account(request), null);
   await db.profile(user.id, { name: 'Maxx', avatar: null }); assert.equal(await db.avatar(user.id), null);
+  await db.deleteRoom('AB12');
+  assert.equal(await db.moderationRoom('AB12'), null);
+  assert.equal((await db.pool.query('SELECT * FROM chat_rooms WHERE code=$1', ['AB12'])).rows.length, 0);
+  assert.equal((await db.pool.query('SELECT * FROM moderation_messages WHERE room_code=$1', ['AB12'])).rows.length, 0);
+  await assert.rejects(db.saveRoom(room), /deleted/);
 });

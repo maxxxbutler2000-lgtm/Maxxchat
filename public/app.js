@@ -364,7 +364,8 @@ async function loadAdminRooms(append = false) {
     if (!append) byId('adminRooms').replaceChildren();
     for (const room of data.rooms) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button';
-      button.textContent = `# ${room.code}`; button.title = new Date(room.createdAt).toLocaleString();
+      button.textContent = room.people?.map(person => person.name).join(', ') || 'No participants recorded';
+      button.title = `# ${room.code} - ${new Date(room.createdAt).toLocaleString()}`;
       button.dataset.code = room.code; button.addEventListener('click', () => loadAdminRoom(room.code));
       byId('adminRooms').append(button);
     }

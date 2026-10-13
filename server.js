@@ -140,6 +140,14 @@ function broadcast(room, event, data) {
   }
 }
 
+function closeUserStreams(userId) {
+  for (const room of rooms.values()) {
+    for (const [id, response] of room.clients) {
+      if (response.accountId === userId) { room.clients.delete(id); response.end(); }
+    }
+  }
+}
+
 function sendJson(response, status, body) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -201,7 +209,7 @@ async function handleApi(request, response, url) {
     return;
   }
   if (url.pathname === '/api/logout' && request.method === 'POST') {
-    await database.logout(request); setCookie(''); sendJson(response, 200, { ok: true }); return;
+    await database.logout(request); closeUserStreams(account.id); setCookie(''); sendJson(response, 200, { ok: true }); return;
   }
   if (url.pathname === '/api/profile' && request.method === 'POST') {
     const user = await database.profile(account.id, await readBody(request));
@@ -252,8 +260,18 @@ async function handleApi(request, response, url) {
     });
     response.write(`event: state\ndata: ${JSON.stringify(roomPayload(room))}\n\n`);
     const connectionId = crypto.randomUUID();
+    response.accountId = userId;
     room.clients.set(connectionId, response);
-    const heartbeat = setInterval(() => response.write(': heartbeat\n\n'), 20000);
+    let checkingSession = false;
+    const heartbeat = setInterval(async () => {
+      if (checkingSession) return;
+      checkingSession = true;
+      try {
+        if (!await database.account(request) || !room.users.has(userId)) response.end();
+        else response.write(': heartbeat\n\n');
+      } catch { response.end(); }
+      finally { checkingSession = false; }
+    }, 20000);
 
     request.on("close", () => {
       clearInterval(heartbeat);
@@ -314,6 +332,7 @@ async function handleApi(request, response, url) {
       room.users.delete(user.id);
       room.typing.delete(user.id);
       await pushSystem(room, `${user.name} left.`);
+      closeUserStreams(user.id);
     }
     sendJson(response, 200, { ok: true });
     return;

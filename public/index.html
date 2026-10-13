@@ -8,7 +8,26 @@
   </head>
   <body>
     <main class="shell">
-      <section class="entry-view" id="entryView">
+      <section class="account-view" id="accountView">
+        <div class="brand-mark" aria-hidden="true">M</div>
+        <h2>Maxxchat</h2>
+        <div class="auth-tabs" role="tablist" aria-label="Account">
+          <button type="button" role="tab" aria-selected="true" id="loginTab">Sign in</button>
+          <button type="button" role="tab" aria-selected="false" id="signupTab">Sign up</button>
+        </div>
+        <form id="authForm">
+          <label id="signupNameLabel" class="hidden"><span>Display name</span><input id="signupName" maxlength="28" autocomplete="nickname" placeholder="example:Maxx"></label>
+          <label><span>Email</span><input id="emailInput" type="email" autocomplete="username" required maxlength="254"></label>
+          <label><span>Password</span><input id="passwordInput" type="password" autocomplete="current-password" minlength="10" maxlength="128" required></label>
+          <p id="authError" class="form-error" role="alert"></p>
+          <button id="authSubmit" class="primary-button" type="submit">Sign in</button>
+        </form>
+      </section>
+      <div class="account-toolbar hidden" id="accountToolbar">
+        <button class="ghost-button" type="button" id="profileButton">My profile</button>
+        <button class="ghost-button" type="button" id="logoutButton">Sign out</button>
+      </div>
+      <section class="entry-view hidden" id="entryView">
         <div class="brand-panel">
           <div class="brand-mark" aria-hidden="true">R</div>
           <div>
@@ -24,7 +43,7 @@
         <form class="join-panel" id="joinForm">
           <label>
             <span>Your name</span>
-            <input id="nameInput" name="name" autocomplete="nickname" maxlength="28" placeholder="example:Maxx" required>
+            <input id="nameInput" name="name" autocomplete="nickname" maxlength="28" placeholder="example:Maxx" readonly>
           </label>
 
           <div class="room-actions">
@@ -41,6 +60,7 @@
           </div>
 
           <p class="form-error" id="formError" role="alert"></p>
+          <div id="savedRooms" class="saved-rooms"></div>
         </form>
       </section>
 
@@ -86,6 +106,17 @@
         </div>
       </section>
     </main>
+    <dialog id="profileDialog">
+      <form id="profileForm">
+        <h2>My profile</h2>
+        <div class="profile-preview avatar" id="profilePreview"></div>
+        <label><span>Profile picture</span><input id="avatarInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
+        <button type="button" class="ghost-button" id="removeAvatar">Remove picture</button>
+        <label><span>Display name</span><input id="profileName" maxlength="28" required></label>
+        <p class="form-error" id="profileError" role="alert"></p>
+        <div class="profile-actions"><button class="secondary-button" type="button" id="closeProfile">Cancel</button><button class="primary-button" type="submit" id="saveProfile">Save profile</button></div>
+      </form>
+    </dialog>
 
     <script src="/app.js" defer></script>
   </body>

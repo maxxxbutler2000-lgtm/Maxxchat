@@ -5,6 +5,10 @@ const state = {
   typingTimer: null,
   sentTyping: false
 };
+let account = null;
+let signupMode = false;
+let newAvatar;
+const byId = id => document.getElementById(id);
 
 const entryView = document.querySelector("#entryView");
 const chatView = document.querySelector("#chatView");
@@ -40,6 +44,10 @@ function initials(name) {
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join("");
+}
+
+function avatarContent(user) {
+  return user.avatar ? `<img src="${escapeHtml(user.avatar)}" alt="" loading="lazy">` : escapeHtml(initials(user.name));
 }
 
 function timeLabel(timestamp) {
@@ -103,7 +111,7 @@ function renderState(room) {
   memberList.innerHTML = room.users
     .map((user) => `
       <li class="member">
-        <span class="avatar" style="background:${user.color}">${escapeHtml(initials(user.name))}</span>
+        <span class="avatar" style="background:${user.color}">${avatarContent(user)}</span>
         <span>${escapeHtml(user.name)}${user.id === state.user.id ? " (you)" : ""}</span>
       </li>
     `)
@@ -128,7 +136,7 @@ function appendMessage(message) {
     const own = message.userId === state.user.id;
     element.className = `message${own ? " own" : ""}`;
     element.innerHTML = `
-      <span class="avatar" style="background:${message.color}">${escapeHtml(initials(message.userName))}</span>
+      <span class="avatar" style="background:${message.color}">${avatarContent(roomUser(message))}</span>
       <div class="bubble">
         <div class="message-meta">
           <span class="message-name">${escapeHtml(message.userName)}</span>
@@ -141,6 +149,10 @@ function appendMessage(message) {
 
   messages.appendChild(element);
   if (shouldStick) messages.scrollTop = messages.scrollHeight;
+}
+
+function roomUser(message) {
+  return state.room.users.find(user => user.id === message.userId) || { name: message.userName, avatar: message.avatar };
 }
 
 function renderTyping(typing) {
@@ -239,12 +251,94 @@ leaveButton.addEventListener("click", async () => {
   messages.innerHTML = "";
   codeInput.value = "";
   statusPill.textContent = "Connecting";
+  refreshRooms().catch(() => {});
 });
 
-window.addEventListener("beforeunload", () => {
-  if (!state.room || !state.user) return;
-  navigator.sendBeacon(
-    "/api/leave",
-    new Blob([JSON.stringify({ code: state.room.code, userId: state.user.id })], { type: "application/json" })
-  );
+async function refreshRooms() {
+  const response = await fetch('/api/my-rooms');
+  if (!response.ok) return;
+  const data = await response.json();
+  byId('savedRooms').replaceChildren();
+  if (data.rooms.length) {
+    const title = document.createElement('h3'); title.textContent = 'Your rooms'; byId('savedRooms').append(title);
+  }
+  for (const room of data.rooms.sort((a, b) => b.lastActivity - a.lastActivity)) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'secondary-button'; button.textContent = `# ${room.code}`;
+    button.addEventListener('click', async () => {
+      try { const data = await api('/api/join', { code: room.code }); enterRoom(data.room, data.user); }
+      catch (error) { setError(error.message); }
+    });
+    byId('savedRooms').append(button);
+  }
+}
+function showAccount(user) {
+  account = user;
+  byId('accountView').classList.toggle('hidden', !!user);
+  byId('accountToolbar').classList.toggle('hidden', !user);
+  entryView.classList.toggle('hidden', !user);
+  if (user) { nameInput.value = user.name; refreshRooms().catch(() => setError('Could not load saved rooms.')); }
+}
+function authMode(signup) {
+  signupMode = signup;
+  byId('signupNameLabel').classList.toggle('hidden', !signup);
+  byId('signupName').required = signup;
+  byId('passwordInput').autocomplete = signup ? 'new-password' : 'current-password';
+  byId('authSubmit').textContent = signup ? 'Create account' : 'Sign in';
+  byId('loginTab').setAttribute('aria-selected', String(!signup));
+  byId('signupTab').setAttribute('aria-selected', String(signup));
+  byId('authError').textContent = '';
+}
+byId('loginTab').addEventListener('click', () => authMode(false));
+byId('signupTab').addEventListener('click', () => authMode(true));
+byId('authForm').addEventListener('submit', async event => {
+  event.preventDefault(); byId('authSubmit').disabled = true; byId('authError').textContent = '';
+  try {
+    const data = await api(signupMode ? '/api/signup' : '/api/login', { email: byId('emailInput').value, password: byId('passwordInput').value, name: byId('signupName').value });
+    byId('passwordInput').value = ''; showAccount(data.user);
+  } catch (error) { byId('authError').textContent = error.message; }
+  finally { byId('authSubmit').disabled = false; }
 });
+byId('logoutButton').addEventListener('click', async () => {
+  try {
+    await api('/api/logout', {});
+    state.events?.close(); state.room = null; state.user = null;
+    chatView.classList.add('hidden'); showAccount(null);
+  } catch (error) { alert(error.message); }
+});
+function profilePreview(src) {
+  const preview = byId('profilePreview'); preview.replaceChildren(); preview.style.background = account.color;
+  if (src) { const img = document.createElement('img'); img.src = src; img.alt = ''; preview.append(img); }
+  else preview.textContent = initials(byId('profileName').value || account.name);
+}
+byId('profileButton').addEventListener('click', () => {
+  newAvatar = undefined; byId('avatarInput').value = ''; byId('profileName').value = account.name;
+  byId('profileError').textContent = ''; profilePreview(account.avatar ? `${account.avatar}?v=${Date.now()}` : null); byId('profileDialog').showModal();
+});
+byId('closeProfile').addEventListener('click', () => byId('profileDialog').close());
+byId('removeAvatar').addEventListener('click', () => { newAvatar = null; byId('avatarInput').value = ''; profilePreview(null); });
+byId('avatarInput').addEventListener('change', async () => {
+  const file = byId('avatarInput').files[0]; if (!file) return;
+  byId('saveProfile').disabled = true; byId('profileError').textContent = '';
+  try {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5000000) throw new Error('Choose a PNG, JPEG, or WebP under 5 MB.');
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 192;
+    const size = Math.min(bitmap.width, bitmap.height);
+    canvas.getContext('2d').drawImage(bitmap, (bitmap.width - size) / 2, (bitmap.height - size) / 2, size, size, 0, 0, 192, 192);
+    bitmap.close(); newAvatar = canvas.toDataURL('image/jpeg', .8); profilePreview(newAvatar);
+  } catch (error) { byId('profileError').textContent = error.message; }
+  finally { byId('saveProfile').disabled = false; }
+});
+byId('profileForm').addEventListener('submit', async event => {
+  event.preventDefault(); byId('saveProfile').disabled = true;
+  try {
+    const body = { name: byId('profileName').value };
+    if (newAvatar !== undefined) body.avatar = newAvatar;
+    const data = await api('/api/profile', body); account = data.user; nameInput.value = account.name;
+    if (state.user) state.user = account;
+    byId('profileDialog').close();
+  } catch (error) { byId('profileError').textContent = error.message; }
+  finally { byId('saveProfile').disabled = false; }
+});
+fetch('/api/me').then(response => { if (!response.ok) throw new Error(); return response.json(); }).then(data => showAccount(data.user)).catch(() => { byId('authError').textContent = 'Cannot connect to Maxxchat. Please reload.'; });

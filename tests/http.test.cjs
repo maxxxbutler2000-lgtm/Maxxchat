@@ -20,12 +20,23 @@ test('HTTP account flow enforces cookies and room membership', async () => {
     assert.equal((await request('/api/me', null, cookie)).data.user.name, 'Alice');
     const created = await request('/api/rooms', {}, cookie); assert.equal(created.status, 201);
     const code = created.data.room.code; assert.equal(code.length, 4);
+    assert.equal((await request(`/api/room?code=${code}`, null, cookie)).data.room.code, code);
     assert.equal((await request(`/api/admin/rooms/${code}`, { confirmCode: code }, cookie, 'DELETE')).status, 403);
     assert.equal((await request(`/api/admin/rooms/${code}`, { confirmCode: code }, null, 'DELETE')).status, 401);
     const bob = await request('/api/signup', { email: 'bob@example.test', name: 'Bob', password: 'long test password' });
     assert.equal((await request('/api/messages', { code, userId: signup.data.user.id, text: 'Spoof' }, bob.cookie)).status, 404);
     assert.equal((await request('/api/join', { code: code.toLowerCase() }, bob.cookie)).status, 200);
-    assert.equal((await request('/api/messages', { code, userId: signup.data.user.id, text: 'Hi Alice' }, bob.cookie)).status, 201);
+    const stream = await fetch(`http://127.0.0.1:${port}/api/events?code=${code}`, { headers: { Cookie: cookie } });
+    const reader = stream.body.getReader();
+    await reader.read();
+    const sent = await request('/api/messages', { code, userId: signup.data.user.id, text: 'Hi Alice' }, bob.cookie);
+    assert.equal(sent.status, 201); assert.equal(sent.data.message.text, 'Hi Alice');
+    let timer;
+    try {
+      const packet = await Promise.race([reader.read(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Live message was not delivered')), 3000); })]);
+      assert.match(new TextDecoder().decode(packet.value), /Hi Alice/);
+    } finally { clearTimeout(timer); await reader.cancel(); }
+    assert.equal((await request(`/api/room?code=${code}`, null, cookie)).data.room.messages.at(-1).text, 'Hi Alice');
     const rejoined = await request('/api/join', { code }, cookie);
     assert.equal(rejoined.data.room.messages.find(message => message.text === 'Hi Alice').userId, bob.data.user.id);
     assert.equal((await request('/api/profile', { name: 'Alice Updated' }, cookie)).data.user.name, 'Alice Updated');

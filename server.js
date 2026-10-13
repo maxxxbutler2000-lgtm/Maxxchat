@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
+const database = require('./database');
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -56,9 +57,9 @@ function getRoom(code) {
   return rooms.get(cleanRoomCode(code));
 }
 
-function createRoom(ownerName) {
+async function createRoom(account) {
   const code = makeRoomCode();
-  const user = makeUser(ownerName);
+  const user = account;
   const room = {
     code,
     users: new Map([[user.id, user]]),
@@ -69,17 +70,20 @@ function createRoom(ownerName) {
     lastActivity: Date.now()
   };
   rooms.set(code, room);
-  pushSystem(room, `${user.name} created the room.`);
+  try { await pushSystem(room, `${user.name} created the room.`); }
+  catch (error) { rooms.delete(code); throw error; }
   return { room, user };
 }
 
-function joinRoom(code, name) {
+async function joinRoom(code, account) {
   const room = getRoom(code);
   if (!room) return null;
-  const user = makeUser(name);
+  const user = account;
+  const existing = room.users.has(user.id);
   room.users.set(user.id, user);
   room.lastActivity = Date.now();
-  pushSystem(room, `${user.name} joined.`);
+  if (!existing) await pushSystem(room, `${user.name} joined.`);
+  else await database.saveRoom(room);
   return { room, user };
 }
 
@@ -89,14 +93,15 @@ function roomPayload(room) {
     users: Array.from(room.users.values()).map((user) => ({
       id: user.id,
       name: user.name,
-      color: user.color
+      color: user.color,
+      avatar: user.avatar
     })),
     messages: room.messages.slice(-80),
     typing: Array.from(room.typing.values())
   };
 }
 
-function pushSystem(room, text) {
+async function pushSystem(room, text) {
   const message = {
     id: crypto.randomUUID(),
     type: "system",
@@ -104,11 +109,13 @@ function pushSystem(room, text) {
     createdAt: Date.now()
   };
   room.messages.push(message);
+  room.messages = room.messages.slice(-160);
+  await database.saveRoom(room);
   broadcast(room, "message", message);
   broadcast(room, "state", roomPayload(room));
 }
 
-function pushChat(room, user, text) {
+async function pushChat(room, user, text) {
   const message = {
     id: crypto.randomUUID(),
     type: "chat",
@@ -116,11 +123,13 @@ function pushChat(room, user, text) {
     userId: user.id,
     userName: user.name,
     color: user.color,
+    avatar: user.avatar,
     createdAt: Date.now()
   };
   room.messages.push(message);
   room.messages = room.messages.slice(-160);
   room.lastActivity = Date.now();
+  await database.saveRoom(room);
   broadcast(room, "message", message);
 }
 
@@ -144,7 +153,7 @@ function readBody(request) {
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 10_000) {
+      if (body.length > 150_000) {
         request.destroy();
         reject(new Error("Body too large"));
       }
@@ -160,16 +169,64 @@ function readBody(request) {
 }
 
 async function handleApi(request, response, url) {
+  if (request.method === 'POST' && request.headers.origin && request.headers.origin !== `${request.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'}://${request.headers.host}`) {
+    sendJson(response, 403, { error: 'Request origin is not allowed.' });
+    return;
+  }
+  const secure = request.headers['x-forwarded-proto'] === 'https' || process.env.NODE_ENV === 'production';
+  const setCookie = token => response.setHeader('Set-Cookie', `maxxchat_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${token ? 2592000 : 0}${secure ? '; Secure' : ''}`);
+  if (request.method === 'POST' && ['/api/signup', '/api/login'].includes(url.pathname)) {
+    const ip = request.socket.remoteAddress;
+    const key = `${ip}:${url.pathname}`;
+    const attempts = authAttempts.get(key) || { count: 0, until: Date.now() + 60000 };
+    if (attempts.until < Date.now()) { attempts.count = 0; attempts.until = Date.now() + 60000; }
+    attempts.count++;
+    authAttempts.set(key, attempts);
+    if (attempts.count > 30) { sendJson(response, 429, { error: 'Too many attempts. Wait one minute.' }); return; }
+    const body = await readBody(request);
+    const user = await (url.pathname === '/api/signup' ? database.signup(body) : database.login(body));
+    setCookie(await database.session(user.id));
+    sendJson(response, 200, { user });
+    return;
+  }
+  const account = await database.account(request);
+  if (url.pathname === '/api/me' && request.method === 'GET') { sendJson(response, 200, { user: account }); return; }
+  if (!account) { sendJson(response, 401, { error: 'Please sign in first.' }); return; }
+  if (url.pathname.startsWith('/api/avatar/') && request.method === 'GET') {
+    const image = await database.avatar(url.pathname.slice('/api/avatar/'.length));
+    if (!image) { response.writeHead(404); response.end(); return; }
+    const [header, bytes] = image.split(',');
+    response.writeHead(200, { 'Content-Type': header.slice(5, header.indexOf(';')), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    response.end(Buffer.from(bytes, 'base64'));
+    return;
+  }
+  if (url.pathname === '/api/logout' && request.method === 'POST') {
+    await database.logout(request); setCookie(''); sendJson(response, 200, { ok: true }); return;
+  }
+  if (url.pathname === '/api/profile' && request.method === 'POST') {
+    const user = await database.profile(account.id, await readBody(request));
+    for (const room of rooms.values()) {
+      if (room.users.has(user.id)) {
+        room.users.set(user.id, user);
+        await database.saveRoom(room);
+        broadcast(room, 'state', roomPayload(room));
+      }
+    }
+    sendJson(response, 200, { user }); return;
+  }
+  if (url.pathname === '/api/my-rooms' && request.method === 'GET') {
+    sendJson(response, 200, { rooms: [...rooms.values()].filter(room => room.users.has(account.id)).map(room => ({ code: room.code, lastActivity: room.lastActivity })) }); return;
+  }
   if (request.method === "POST" && url.pathname === "/api/rooms") {
     const body = await readBody(request);
-    const { room, user } = createRoom(body.name);
+    const { room, user } = await createRoom(account);
     sendJson(response, 201, { room: roomPayload(room), user });
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/join") {
     const body = await readBody(request);
-    const joined = joinRoom(body.code, body.name);
+    const joined = await joinRoom(body.code, account);
     if (!joined) {
       sendJson(response, 404, { error: "No room found for that code." });
       return;
@@ -180,7 +237,7 @@ async function handleApi(request, response, url) {
 
   if (request.method === "GET" && url.pathname === "/api/events") {
     const code = cleanRoomCode(url.searchParams.get("code"));
-    const userId = url.searchParams.get("userId");
+    const userId = account.id;
     const room = getRoom(code);
     if (!room || !room.users.has(userId)) {
       sendJson(response, 404, { error: "Room or user not found." });
@@ -194,10 +251,13 @@ async function handleApi(request, response, url) {
       "X-Accel-Buffering": "no"
     });
     response.write(`event: state\ndata: ${JSON.stringify(roomPayload(room))}\n\n`);
-    room.clients.set(userId, response);
+    const connectionId = crypto.randomUUID();
+    room.clients.set(connectionId, response);
+    const heartbeat = setInterval(() => response.write(': heartbeat\n\n'), 20000);
 
     request.on("close", () => {
-      room.clients.delete(userId);
+      clearInterval(heartbeat);
+      room.clients.delete(connectionId);
       room.typing.delete(userId);
       broadcast(room, "state", roomPayload(room));
     });
@@ -207,7 +267,7 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/messages") {
     const body = await readBody(request);
     const room = getRoom(body.code);
-    const user = room && room.users.get(body.userId);
+    const user = room && room.users.get(account.id);
     const text = cleanMessage(body.text);
     if (!room || !user) {
       sendJson(response, 404, { error: "Room or user not found." });
@@ -218,7 +278,7 @@ async function handleApi(request, response, url) {
       return;
     }
     room.typing.delete(user.id);
-    pushChat(room, user, text);
+    await pushChat(room, user, text);
     broadcast(room, "state", roomPayload(room));
     sendJson(response, 201, { ok: true });
     return;
@@ -227,7 +287,7 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/typing") {
     const body = await readBody(request);
     const room = getRoom(body.code);
-    const user = room && room.users.get(body.userId);
+    const user = room && room.users.get(account.id);
     if (!room || !user) {
       sendJson(response, 404, { error: "Room or user not found." });
       return;
@@ -249,13 +309,11 @@ async function handleApi(request, response, url) {
   if (request.method === "POST" && url.pathname === "/api/leave") {
     const body = await readBody(request);
     const room = getRoom(body.code);
-    const user = room && room.users.get(body.userId);
+    const user = room && room.users.get(account.id);
     if (room && user) {
       room.users.delete(user.id);
       room.typing.delete(user.id);
-      room.clients.delete(user.id);
-      pushSystem(room, `${user.name} left.`);
-      if (room.users.size === 0) rooms.delete(room.code);
+      await pushSystem(room, `${user.name} left.`);
     }
     sendJson(response, 200, { ok: true });
     return;
@@ -267,7 +325,7 @@ async function handleApi(request, response, url) {
 function serveStatic(request, response, url) {
   const requestedPath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   const filePath = path.normalize(path.join(PUBLIC_DIR, requestedPath));
-  if (!filePath.startsWith(PUBLIC_DIR)) {
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;
@@ -286,26 +344,35 @@ function serveStatic(request, response, url) {
   });
 }
 
+const authAttempts = new Map();
+let mutations = Promise.resolve();
 const server = http.createServer(async (request, response) => {
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('Referrer-Policy', 'same-origin');
+  response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   const url = new URL(request.url, `http://${request.headers.host}`);
   try {
     if (url.pathname.startsWith("/api/")) {
-      await handleApi(request, response, url);
+      // Serialize room mutations so persisted snapshots cannot arrive out of order.
+      if (request.method === 'POST' && !['/api/login', '/api/signup'].includes(url.pathname)) {
+        const operation = mutations.then(() => handleApi(request, response, url));
+        mutations = operation.catch(() => {});
+        await operation;
+      } else await handleApi(request, response, url);
     } else {
       serveStatic(request, response, url);
     }
   } catch (error) {
-    sendJson(response, 500, { error: "Something went wrong." });
+    console.error('Request failed:', error.code || error.name);
+    if (!response.headersSent) sendJson(response, error.status || (error instanceof SyntaxError ? 400 : 500), { error: error.status ? error.message : 'Something went wrong. Please try again.' });
   }
 });
 
 setInterval(() => {
-  const staleBefore = Date.now() - 1000 * 60 * 60 * 6;
-  for (const [code, room] of rooms.entries()) {
-    if (room.lastActivity < staleBefore && room.users.size === 0) rooms.delete(code);
-  }
+  for (const [key, entry] of authAttempts) if (entry.until < Date.now()) authAttempts.delete(key);
 }, 1000 * 60 * 30).unref();
 
-server.listen(PORT, () => {
-  console.log(`Chatroom running at http://localhost:${PORT}`);
-});
+database.initialize().then(saved => {
+  for (const room of saved) rooms.set(room.code, { ...room, users: new Map(room.users.map(user => [user.id, user])), clients: new Map(), typing: new Map() });
+  server.listen(PORT, () => console.log(`Maxxchat running at http://localhost:${PORT}`));
+}).catch(error => { console.error('Database startup failed:', error.message); process.exit(1); });

@@ -1,0 +1,12 @@
+{
+  "name": "maxxchat",
+  "version": "1.0.0",
+  "description": "Maxxchat, a room code chat app with realtime browser messaging.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

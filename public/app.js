@@ -109,7 +109,21 @@ function connectEvents() {
   events.onerror = () => {
     statusPill.textContent = "Reconnecting";
   };
+  events.onopen = () => { statusPill.textContent = 'Connected'; };
 }
+
+let refreshingChat = false;
+setInterval(async () => {
+  if (!state.room || refreshingChat) return;
+  const code = state.room.code;
+  refreshingChat = true;
+  try {
+    const response = await fetch(`/api/room?code=${encodeURIComponent(code)}`, { cache: 'no-store' });
+    const data = await response.json();
+    if (response.ok && state.room?.code === code) renderState(data.room);
+  } catch { /* The live stream can continue while a refresh fails. */ }
+  finally { refreshingChat = false; }
+}, 4000);
 
 function renderState(room) {
   state.room = { ...state.room, ...room };
@@ -122,8 +136,14 @@ function renderState(room) {
     `)
     .join("");
 
-  messages.innerHTML = "";
-  room.messages.forEach(appendMessage);
+  const stick = messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 80;
+  const oldScroll = messages.scrollTop;
+  const currentIds = [...messages.children].map(element => element.dataset.messageId);
+  if (currentIds.join(',') !== room.messages.map(message => message.id).join(',')) {
+    messages.replaceChildren();
+    room.messages.forEach(appendMessage);
+    messages.scrollTop = stick ? messages.scrollHeight : oldScroll;
+  }
   renderTyping(room.typing || []);
 }
 
@@ -240,7 +260,7 @@ messageForm.addEventListener("submit", async (event) => {
     code: state.room.code,
     userId: state.user.id,
     text
-  }).catch((error) => {
+  }).then(data => { if (data.message && state.room) { appendMessage(data.message); messages.scrollTop = messages.scrollHeight; } }).catch((error) => {
     messageInput.value = text;
     alert(error.message);
   });
